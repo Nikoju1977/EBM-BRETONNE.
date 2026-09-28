@@ -54,6 +54,7 @@ input[type=range]{accent-color:var(--neon);height:23px}input[type=text],select{b
     <label class="field">Master <output id="volOut">-6 dB</output><input id="vol" type="range" min="-36" max="0" value="-6"></label>
     <label class="field">Tonalité<select id="tonic"><option value="0">Sol (G)</option><option value="2">La (A)</option><option value="3">Si♭ (B♭)</option><option value="5">Do (C)</option><option value="-5">Ré (D)</option><option value="-3">Mi (E)</option><option value="-2">Fa (F)</option></select></label>
     <button class="btn" id="droneBtn" disabled>Bourdon : off</button>
+    <button class="btn" id="testBtn" disabled>Test son</button>
     <button class="btn rec" id="recBtn" disabled>Enregistrer</button>
     <button class="btn" id="saveBtn" disabled>Sauver</button>
     <button class="btn" id="loadBtn" disabled>Charger</button>
@@ -180,7 +181,7 @@ const knobRuns=[
 ];
 function applyAll(){knobRuns.forEach(fn=>fn())}
 $('tonic').onchange=e=>{transpose=+e.target.value;if(audioReady)droneOsc.frequency.rampTo(fq(DRONE_NOTE),.25)}
-function togglePlay(){if(!audioReady)return;if(Tone.Transport.state==='started'){Tone.Transport.stop();levriad.triggerRelease();biniouPrev=null;lastSeqStep=-1;currentStep=-1;document.querySelectorAll('.cell.play').forEach(c=>c.classList.remove('play'));$('playBtn').textContent='Lecture';$('playBtn').classList.remove('on')}else{Tone.Transport.start('+0.05');$('playBtn').textContent='Stop';$('playBtn').classList.add('on')}}
+async function togglePlay(){if(!audioReady)return;await ensureAudioRunning();if(Tone.Transport.state==='started'){Tone.Transport.stop();levriad.triggerRelease();biniouPrev=null;lastSeqStep=-1;currentStep=-1;document.querySelectorAll('.cell.play').forEach(c=>c.classList.remove('play'));$('playBtn').textContent='Lecture';$('playBtn').classList.remove('on')}else{Tone.Transport.start('+0.05');$('playBtn').textContent='Stop';$('playBtn').classList.add('on')}}
 $('playBtn').onclick=togglePlay;
 $('droneBtn').onclick=()=>{droneOn=!droneOn;droneGate.gain.rampTo(droneOn?1:0,.35);$('droneBtn').textContent='Bourdon : '+(droneOn?'on':'off');$('droneBtn').classList.toggle('on',droneOn)};
 $('ornBtn').onclick=()=>{ornaments=!ornaments;$('ornBtn').textContent='Ornements : '+(ornaments?'on':'off');$('ornBtn').classList.toggle('on',ornaments)};
@@ -194,7 +195,36 @@ $('loadBtn').onclick=async()=>{const raw=await safeStorage.get('project');if(!ra
 
 function drawScope(){const cv=$('scope'),ctx=cv.getContext('2d');function size(){cv.width=cv.clientWidth*devicePixelRatio;cv.height=58*devicePixelRatio}size();addEventListener('resize',size);(function loop(){if(!scope)return requestAnimationFrame(loop);const v=scope.getValue(),w=cv.width,h=cv.height;ctx.fillStyle='#050505';ctx.fillRect(0,0,w,h);ctx.strokeStyle='#3dff7a';ctx.lineWidth=1.5*devicePixelRatio;ctx.beginPath();for(let i=0;i<v.length;i++){const x=i/(v.length-1)*w,y=(.5-v[i]*.45)*h;i?ctx.lineTo(x,y):ctx.moveTo(x,y)}ctx.stroke();requestAnimationFrame(loop)})()}
 function setStatus(t){$('status').textContent=t}
-$('bootBtn').onclick=async()=>{const st=$('bootStatus');if(typeof Tone==='undefined'){st.textContent='Tone.js ne s’est pas chargé.';return}$('bootBtn').disabled=true;st.textContent='Démarrage du moteur audio…';try{await Tone.start();await buildAudio();['playBtn','droneBtn','recBtn','saveBtn','loadBtn'].forEach(id=>$(id).disabled=false);$('boot').classList.add('hidden');setStatus('V2 prête. Espace = lecture/stop.');drawScope()}catch(e){st.textContent='Échec audio : '+e.message;$('bootBtn').disabled=false}};
+
+async function ensureAudioRunning(){
+  await Tone.start();
+  try{
+    const tc=typeof Tone.getContext==='function'?Tone.getContext():Tone.context;
+    const raw=tc&&tc.rawContext?tc.rawContext:tc;
+    if(raw&&raw.state==='suspended'&&typeof raw.resume==='function') await raw.resume();
+    const state=raw&&raw.state?raw.state:'inconnu';
+    if(state!=='running') setStatus('Audio: '+state+'. Touchez « Test son » pour le réactiver.');
+    return state==='running';
+  }catch(e){
+    setStatus('Audio non réactivé : '+e.message);
+    return false;
+  }
+}
+
+$('testBtn').onclick=async()=>{
+  try{
+    const ok=await ensureAudioRunning();
+    kick.triggerAttackRelease('C1','8n');
+    levriad.triggerAttackRelease(fq('G4'),'8n','+0.03');
+    setStatus(ok?'Test son envoyé. Si vous n’entendez rien, vérifiez le volume/mode silencieux.':'Contexte audio toujours suspendu.');
+  }catch(e){setStatus('Test son impossible : '+e.message)}
+};
+
+document.addEventListener('visibilitychange',async()=>{
+  if(!document.hidden&&audioReady){try{await ensureAudioRunning()}catch{}}
+});
+
+$('bootBtn').onclick=async()=>{const st=$('bootStatus');if(typeof Tone==='undefined'){st.textContent='Tone.js ne s’est pas chargé.';return}$('bootBtn').disabled=true;st.textContent='Démarrage du moteur audio…';try{await Tone.start();await buildAudio();await ensureAudioRunning();['playBtn','droneBtn','testBtn','recBtn','saveBtn','loadBtn'].forEach(id=>$(id).disabled=false);$('boot').classList.add('hidden');setStatus('V2 prête. Si aucun son: « Test son ».');drawScope()}catch(e){st.textContent='Échec audio : '+e.message;$('bootBtn').disabled=false}};
 buildDrums();buildRoll('bassGrid',NOTES_BASS,'bass');buildRoll('biniouGrid',NOTES_BINIOU,'biniou');buildKeys();buildMixer();refresh();
 </script>
 </body>
